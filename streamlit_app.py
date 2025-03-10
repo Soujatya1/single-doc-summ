@@ -6,14 +6,8 @@ from langchain_groq import ChatGroq
 from langchain.chains.summarize import load_summarize_chain
 from docx import Document as DocxDocument
 from docx.shared import Pt
-import tiktoken
 import re
 import os
-
-def count_tokens(text, model="cl100k_base"):
-    """Returns the number of tokens in a text string."""
-    encoding = tiktoken.get_encoding(model)
-    return len(encoding.encode(text))
 
 st.title("Document Summary Generator")
 
@@ -35,8 +29,6 @@ if summarize_button and uploaded_file is not None:
                 content = page.extract_text()
                 if content:
                     text += content + "\n"
-            
-            input_token_count = count_tokens(text)
             
             docs = [Document(page_content=text)]
             
@@ -84,8 +76,6 @@ if summarize_button and uploaded_file is not None:
             output_summary = chain.invoke(docs)
         
         output = output_summary['output_text']
-        
-        output_token_count = count_tokens(output)
         
         # Display the summary
         st.write("### Summary:")
