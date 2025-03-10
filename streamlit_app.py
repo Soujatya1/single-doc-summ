@@ -32,7 +32,7 @@ if summarize_button and uploaded_file is not None:
                     text += content + "\n"
             
             input_token_count = count_tokens(text)
-            st.write(f"**Input Tokens:** {input_token_count}")
+            #st.write(f"**Input Tokens:** {input_token_count}")
             
             docs = [Document(page_content=text)]
             
@@ -43,7 +43,9 @@ if summarize_button and uploaded_file is not None:
                 top_p=0.2
             )
             
-            template = '''Analyze the following document and extract:
+            template = '''
+            At the beginning, put the document name as a heading without file extensions(like .pdf, .docx)
+            Analyze the following document and extract:
             
             1. Overview (brief summary of the document in 3-5 lines)
             2. Involved Parties (key individuals or organizations mentioned)
@@ -79,8 +81,8 @@ if summarize_button and uploaded_file is not None:
         
         output_token_count = count_tokens(output)
         
-        st.write(f"**Output Tokens:** {output_token_count}")
-        st.write(f"**Total Tokens Used:** {input_token_count + output_token_count}")
+        #st.write(f"**Output Tokens:** {output_token_count}")
+        #st.write(f"**Total Tokens Used:** {input_token_count + output_token_count}")
         
         # Display the summary
         st.write("### Summary:")
