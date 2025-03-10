@@ -4,8 +4,10 @@ from langchain.docstore.document import Document
 from langchain.prompts import PromptTemplate
 from langchain_groq import ChatGroq
 from langchain.chains.summarize import load_summarize_chain
-from docx import Document as DocxDocument
-from docx.shared import Pt
+from reportlab.lib.pagesizes import letter
+from reportlab.lib import colors
+from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, ListItem, ListFlowable
 import re
 import os
 
@@ -81,14 +83,31 @@ if summarize_button and uploaded_file is not None:
         st.write("### Summary:")
         st.write(output)
         
-        # Create DOCX document
-        doc = DocxDocument()
+        # Create PDF document
+        pdf_output_path = "document_summary.pdf"
+        doc = SimpleDocTemplate(pdf_output_path, pagesize=letter)
         
-        # Add document name as title (using the filename without extension)
-        title = doc.add_paragraph()
-        title_run = title.add_run(filename_without_ext)
-        title_run.bold = True
-        title_run.font.size = Pt(16)
+        # Set up styles
+        styles = getSampleStyleSheet()
+        title_style = styles['Title']
+        heading_style = styles['Heading2']
+        
+        # Create bullet point style
+        bullet_style = ParagraphStyle(
+            'BulletPoint',
+            parent=styles['Normal'],
+            leftIndent=20,
+            firstLineIndent=0,
+            spaceBefore=2,
+            spaceAfter=2
+        )
+        
+        # Build the PDF content
+        content = []
+        
+        # Add document name as title
+        content.append(Paragraph(filename_without_ext, title_style))
+        content.append(Spacer(1, 12))
         
         # Format and add the summary sections
         sections = ["Overview", "Involved Parties", "Issues before the Court", "Observation/Decision of the Court"]
@@ -102,10 +121,8 @@ if summarize_button and uploaded_file is not None:
                 section_content = section_match.group(1).strip()
                 
                 # Add section heading
-                section_heading = doc.add_paragraph()
-                section_run = section_heading.add_run(section)
-                section_run.bold = True
-                section_run.font.size = Pt(14)
+                content.append(Paragraph(section, heading_style))
+                content.append(Spacer(1, 6))
                 
                 # Improved bullet point handling
                 # First normalize bullet points to ensure consistent format
@@ -114,25 +131,36 @@ if summarize_button and uploaded_file is not None:
                 bullet_points = re.split(r'\n\s*·\s*|\s*·\s*', normalized_content)
                 bullet_points = [p.strip() for p in bullet_points if p.strip()]
                 
+                # Create a list of bullet points
+                bullets = []
                 for point in bullet_points:
-                    # Use proper bullet points with appropriate indentation
-                    bullet_para = doc.add_paragraph(style='List Bullet')
-                    bullet_para.style.font.size = Pt(11)
                     # Remove any existing bullet characters at the start of the content
                     point = re.sub(r'^[·•*]\s*', '', point)
-                    content_run = bullet_para.add_run(point)
-                    content_run.font.size = Pt(11)
+                    bullets.append(ListItem(Paragraph(point, bullet_style)))
+                
+                if bullets:
+                    bullet_list = ListFlowable(
+                        bullets,
+                        bulletType='bullet',
+                        start=None,
+                        bulletFontName='Helvetica',
+                        bulletFontSize=8,
+                        leftIndent=20
+                    )
+                    content.append(bullet_list)
+                
+                content.append(Spacer(1, 12))
         
-        # Save and provide download
-        doc_output_path = "document_summary.docx"
-        doc.save(doc_output_path)
+        # Build the PDF
+        doc.build(content)
         
-        with open(doc_output_path, "rb") as doc_file:
+        # Provide download button
+        with open(pdf_output_path, "rb") as pdf_file:
             st.download_button(
-                "Download Summary DOCX",
-                doc_file,
-                file_name=f"{filename_without_ext}_summary.docx",
-                mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+                "Download Summary PDF",
+                pdf_file,
+                file_name=f"{filename_without_ext}_summary.pdf",
+                mime="application/pdf"
             )
             
     except Exception as e:
