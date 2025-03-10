@@ -9,7 +9,6 @@ from docx import Document as DocxDocument
 from docx.shared import Pt
 import tiktoken
 
-# Function to count tokens
 def count_tokens(text, model="cl100k_base"):
     """Returns the number of tokens in a text string."""
     encoding = tiktoken.get_encoding(model)
@@ -20,20 +19,17 @@ uploaded_file = st.file_uploader("Upload a PDF file", type="pdf")
 
 if uploaded_file is not None:
     pdf = PdfReader(uploaded_file)
-    # Read text from PDF
     text = ''
     for page in pdf.pages:
         content = page.extract_text()
         if content:
             text += content + "\n"
     
-    # Count input tokens
     input_token_count = count_tokens(text)
     st.write(f"**Input Tokens:** {input_token_count}")
     
     docs = [Document(page_content=text)]
     
-    # LLM model
     llm = ChatGroq(groq_api_key='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', 
                    model_name='llama3-70b-8192', temperature=0.2, top_p=0.2)
     
@@ -49,7 +45,6 @@ if uploaded_file is not None:
     '''
     prompt = PromptTemplate(input_variables=['text'], template=template)
     
-    # Summarization chain
     chain = load_summarize_chain(llm, chain_type='stuff', prompt=prompt, verbose=False)
     
     with st.spinner("Generating summary..."):
@@ -57,14 +52,11 @@ if uploaded_file is not None:
     
     output = output_summary['output_text']
     
-    # Count output tokens
     output_token_count = count_tokens(output)
     
-    # Display token counts
     st.write(f"**Output Tokens:** {output_token_count}")
     st.write(f"**Total Tokens Used:** {input_token_count + output_token_count}")
     
-    # Process sections
     sections = ["Overview", "Involved Parties", "Key Events", "Key Findings"]
     summary_json = {}
     
@@ -86,7 +78,6 @@ if uploaded_file is not None:
     
     json_summary = json.dumps(summary_json, indent=4)
     
-    # Display and save results
     st.write("### Summary (JSON format):")
     st.json(json_summary)
     
@@ -94,28 +85,23 @@ if uploaded_file is not None:
     with open(json_output_path, "w") as json_file:
         json_file.write(json_summary)
     
-    # Provide download link for JSON
     with open(json_output_path, "rb") as json_file:
         st.download_button("Download Summary JSON", json_file, file_name="summary_output.json", mime="application/json")
     
-    # Create DOCX document
     doc = DocxDocument()
     
-    # Add token usage information to DOCX
     doc.add_paragraph("Token Usage", style='Heading 1')
     token_info = doc.add_paragraph()
     token_info.add_run(f"Input Tokens: {input_token_count}\n").font.size = Pt(11)
     token_info.add_run(f"Output Tokens: {output_token_count}\n").font.size = Pt(11)
     token_info.add_run(f"Total Tokens: {input_token_count + output_token_count}").font.size = Pt(11)
     
-    # Add sections to DOCX
     if summary_json:
         for section, content in summary_json.items():
             doc.add_paragraph(section, style='Heading 1')
             paragraph = doc.add_paragraph(content)
             paragraph.runs[0].font.size = Pt(11)
     
-    # Save DOCX file
     doc_output_path = "summary_output.docx"
     doc.save(doc_output_path)
     
