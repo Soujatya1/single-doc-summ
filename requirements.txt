@@ -1,2 +1,9 @@
+fpdf
 streamlit
-pandas
+langchain_community
+langchain_core
+langchain_groq
+PyPDF2
+pypdf
+python-docx
+tiktoken
