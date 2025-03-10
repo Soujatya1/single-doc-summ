@@ -7,3 +7,4 @@ PyPDF2
 pypdf
 python-docx
 tiktoken
+reportlab
