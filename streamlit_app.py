@@ -8,6 +8,7 @@ from docx import Document as DocxDocument
 from docx.shared import Pt
 import tiktoken
 import re
+import os
 
 def count_tokens(text, model="cl100k_base"):
     """Returns the number of tokens in a text string."""
@@ -24,6 +25,10 @@ summarize_button = st.button("Summarize")
 if summarize_button and uploaded_file is not None:
     try:
         with st.spinner("Processing document..."):
+            # Extract the filename without extension
+            original_filename = uploaded_file.name
+            filename_without_ext = os.path.splitext(original_filename)[0]
+            
             pdf = PdfReader(uploaded_file)
             text = ''
             for page in pdf.pages:
@@ -32,7 +37,6 @@ if summarize_button and uploaded_file is not None:
                     text += content + "\n"
             
             input_token_count = count_tokens(text)
-            #st.write(f"**Input Tokens:** {input_token_count}")
             
             docs = [Document(page_content=text)]
             
@@ -43,9 +47,9 @@ if summarize_button and uploaded_file is not None:
                 top_p=0.2
             )
             
-            template = '''
-            At the beginning, put the document name as a heading without file extensions(like .pdf, .docx)
-            Analyze the following document and extract:
+            # Include the filename in the prompt
+            template = f'''
+            Analyze the following document titled "{filename_without_ext}" and extract:
             
             1. Overview (brief summary of the document in 3-5 lines)
             2. Involved Parties (key individuals or organizations mentioned)
@@ -53,6 +57,8 @@ if summarize_button and uploaded_file is not None:
             4. Observation/Decision of the Court (precisely the important rulings or conclusions in 5 lines)
             
             Format your response exactly as:
+            
+            **{filename_without_ext}**
             
             **Overview**
             · [Overview content]
@@ -68,7 +74,7 @@ if summarize_button and uploaded_file is not None:
             
             Here is the text to analyze:
             
-            {text}
+            {{text}}
             '''
             
             prompt = PromptTemplate(input_variables=['text'], template=template)
@@ -81,9 +87,6 @@ if summarize_button and uploaded_file is not None:
         
         output_token_count = count_tokens(output)
         
-        #st.write(f"**Output Tokens:** {output_token_count}")
-        #st.write(f"**Total Tokens Used:** {input_token_count + output_token_count}")
-        
         # Display the summary
         st.write("### Summary:")
         st.write(output)
@@ -91,29 +94,19 @@ if summarize_button and uploaded_file is not None:
         # Create DOCX document
         doc = DocxDocument()
         
-        # Add document title
+        # Add document name as title (using the filename without extension)
         title = doc.add_paragraph()
-        title_run = title.add_run("Document Summary")
+        title_run = title.add_run(filename_without_ext)
         title_run.bold = True
         title_run.font.size = Pt(16)
         
-        # Add token usage information
-        token_heading = doc.add_paragraph()
-        token_heading_run = token_heading.add_run("Token Usage")
-        token_heading_run.bold = True
-        token_heading_run.font.size = Pt(14)
-        
-        token_info = doc.add_paragraph()
-        token_info.add_run(f"Input Tokens: {input_token_count}\n").font.size = Pt(11)
-        token_info.add_run(f"Output Tokens: {output_token_count}\n").font.size = Pt(11)
-        token_info.add_run(f"Total Tokens: {input_token_count + output_token_count}").font.size = Pt(11)
-        
-        # Format and add the summary sections using the style from the first script
+        # Format and add the summary sections
         sections = ["Overview", "Involved Parties", "Issues before the Court", "Observation/Decision of the Court"]
         
         for section in sections:
-            section_pattern = rf'\*\*{section}\*\*\n(.*?)(?=\*\*|\Z)'
-            section_match = re.search(section_pattern, output, re.DOTALL)
+            # More precise pattern matching that handles different formatting variations
+            section_pattern = rf'\*\*{re.escape(section)}\*\*([\s\S]*?)(?=\*\*\w|\Z)'
+            section_match = re.search(section_pattern, output)
             
             if section_match:
                 section_content = section_match.group(1).strip()
@@ -124,23 +117,21 @@ if summarize_button and uploaded_file is not None:
                 section_run.bold = True
                 section_run.font.size = Pt(14)
                 
-                # Split bullet points if they exist
-                bullet_points = section_content.split('\n· ')
+                # Improved bullet point handling
+                # First normalize bullet points to ensure consistent format
+                normalized_content = section_content.replace('• ', '· ').replace('* ', '· ')
+                # Split by bullet points, handling different possible formats
+                bullet_points = re.split(r'\n\s*·\s*|\s*·\s*', normalized_content)
+                bullet_points = [p.strip() for p in bullet_points if p.strip()]
                 
-                for i, point in enumerate(bullet_points):
-                    if i == 0 and not point.startswith('· '):
-                        if point.startswith('·'):
-                            point = point[1:].strip()
-                        
-                        bullet_para = doc.add_paragraph()
-                        bullet_para.add_run('· ').font.size = Pt(11)
-                        content_run = bullet_para.add_run(point.strip())
-                        content_run.font.size = Pt(11)
-                    elif i > 0:
-                        bullet_para = doc.add_paragraph()
-                        bullet_para.add_run('· ').font.size = Pt(11)
-                        content_run = bullet_para.add_run(point.strip())
-                        content_run.font.size = Pt(11)
+                for point in bullet_points:
+                    # Use proper bullet points with appropriate indentation
+                    bullet_para = doc.add_paragraph(style='List Bullet')
+                    bullet_para.style.font.size = Pt(11)
+                    # Remove any existing bullet characters at the start of the content
+                    point = re.sub(r'^[·•*]\s*', '', point)
+                    content_run = bullet_para.add_run(point)
+                    content_run.font.size = Pt(11)
         
         # Save and provide download
         doc_output_path = "document_summary.docx"
@@ -150,7 +141,7 @@ if summarize_button and uploaded_file is not None:
             st.download_button(
                 "Download Summary DOCX",
                 doc_file,
-                file_name="document_summary.docx",
+                file_name=f"{filename_without_ext}_summary.docx",
                 mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document"
             )
             
