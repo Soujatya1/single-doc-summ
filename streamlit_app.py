@@ -37,8 +37,8 @@ if uploaded_file is not None:
     
     - Overview
     - Involved Parties
-    - Key Events
-    - Key Findings
+    - Issues before the Court
+    - Observation/ Decision of the Court
     
     Text:
     '{text}'
