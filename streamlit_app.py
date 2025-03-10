@@ -1,151 +1,125 @@
 import streamlit as st
-import pandas as pd
-import math
-from pathlib import Path
+import json
+from PyPDF2 import PdfReader
+from langchain.docstore.document import Document
+from langchain.prompts import PromptTemplate
+from langchain_groq import ChatGroq
+from langchain.chains.summarize import load_summarize_chain
+from docx import Document as DocxDocument
+from docx.shared import Pt
+import tiktoken
 
-# Set the title and favicon that appear in the Browser's tab bar.
-st.set_page_config(
-    page_title='GDP dashboard',
-    page_icon=':earth_americas:', # This is an emoji shortcode. Could be a URL too.
-)
+# Function to count tokens
+def count_tokens(text, model="cl100k_base"):
+    """Returns the number of tokens in a text string."""
+    encoding = tiktoken.get_encoding(model)
+    return len(encoding.encode(text))
 
-# -----------------------------------------------------------------------------
-# Declare some useful functions.
+st.title("Document Summary Generator")
+uploaded_file = st.file_uploader("Upload a PDF file", type="pdf")
 
-@st.cache_data
-def get_gdp_data():
-    """Grab GDP data from a CSV file.
-
-    This uses caching to avoid having to read the file every time. If we were
-    reading from an HTTP endpoint instead of a file, it's a good idea to set
-    a maximum age to the cache with the TTL argument: @st.cache_data(ttl='1d')
-    """
-
-    # Instead of a CSV on disk, you could read from an HTTP endpoint here too.
-    DATA_FILENAME = Path(__file__).parent/'data/gdp_data.csv'
-    raw_gdp_df = pd.read_csv(DATA_FILENAME)
-
-    MIN_YEAR = 1960
-    MAX_YEAR = 2022
-
-    # The data above has columns like:
-    # - Country Name
-    # - Country Code
-    # - [Stuff I don't care about]
-    # - GDP for 1960
-    # - GDP for 1961
-    # - GDP for 1962
-    # - ...
-    # - GDP for 2022
-    #
-    # ...but I want this instead:
-    # - Country Name
-    # - Country Code
-    # - Year
-    # - GDP
-    #
-    # So let's pivot all those year-columns into two: Year and GDP
-    gdp_df = raw_gdp_df.melt(
-        ['Country Code'],
-        [str(x) for x in range(MIN_YEAR, MAX_YEAR + 1)],
-        'Year',
-        'GDP',
-    )
-
-    # Convert years from string to integers
-    gdp_df['Year'] = pd.to_numeric(gdp_df['Year'])
-
-    return gdp_df
-
-gdp_df = get_gdp_data()
-
-# -----------------------------------------------------------------------------
-# Draw the actual page
-
-# Set the title that appears at the top of the page.
-'''
-# :earth_americas: GDP dashboard
-
-Browse GDP data from the [World Bank Open Data](https://data.worldbank.org/) website. As you'll
-notice, the data only goes to 2022 right now, and datapoints for certain years are often missing.
-But it's otherwise a great (and did I mention _free_?) source of data.
-'''
-
-# Add some spacing
-''
-''
-
-min_value = gdp_df['Year'].min()
-max_value = gdp_df['Year'].max()
-
-from_year, to_year = st.slider(
-    'Which years are you interested in?',
-    min_value=min_value,
-    max_value=max_value,
-    value=[min_value, max_value])
-
-countries = gdp_df['Country Code'].unique()
-
-if not len(countries):
-    st.warning("Select at least one country")
-
-selected_countries = st.multiselect(
-    'Which countries would you like to view?',
-    countries,
-    ['DEU', 'FRA', 'GBR', 'BRA', 'MEX', 'JPN'])
-
-''
-''
-''
-
-# Filter the data
-filtered_gdp_df = gdp_df[
-    (gdp_df['Country Code'].isin(selected_countries))
-    & (gdp_df['Year'] <= to_year)
-    & (from_year <= gdp_df['Year'])
-]
-
-st.header('GDP over time', divider='gray')
-
-''
-
-st.line_chart(
-    filtered_gdp_df,
-    x='Year',
-    y='GDP',
-    color='Country Code',
-)
-
-''
-''
-
-
-first_year = gdp_df[gdp_df['Year'] == from_year]
-last_year = gdp_df[gdp_df['Year'] == to_year]
-
-st.header(f'GDP in {to_year}', divider='gray')
-
-''
-
-cols = st.columns(4)
-
-for i, country in enumerate(selected_countries):
-    col = cols[i % len(cols)]
-
-    with col:
-        first_gdp = first_year[first_year['Country Code'] == country]['GDP'].iat[0] / 1000000000
-        last_gdp = last_year[last_year['Country Code'] == country]['GDP'].iat[0] / 1000000000
-
-        if math.isnan(first_gdp):
-            growth = 'n/a'
-            delta_color = 'off'
-        else:
-            growth = f'{last_gdp / first_gdp:,.2f}x'
-            delta_color = 'normal'
-
-        st.metric(
-            label=f'{country} GDP',
-            value=f'{last_gdp:,.0f}B',
-            delta=growth,
-            delta_color=delta_color
-        )
+if uploaded_file is not None:
+    pdf = PdfReader(uploaded_file)
+    # Read text from PDF
+    text = ''
+    for page in pdf.pages:
+        content = page.extract_text()
+        if content:
+            text += content + "\n"
+    
+    # Count input tokens
+    input_token_count = count_tokens(text)
+    st.write(f"**Input Tokens:** {input_token_count}")
+    
+    docs = [Document(page_content=text)]
+    
+    # LLM model
+    llm = ChatGroq(groq_api_key='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', 
+                   model_name='llama3-70b-8192', temperature=0.2, top_p=0.2)
+    
+    template = '''Write a very concise, well-explained, point-wise, short summary of the following text. Provide a structured response with the following sections:
+    
+    - Overview
+    - Involved Parties
+    - Key Events
+    - Key Findings
+    
+    Text:
+    '{text}'
+    '''
+    prompt = PromptTemplate(input_variables=['text'], template=template)
+    
+    # Summarization chain
+    chain = load_summarize_chain(llm, chain_type='stuff', prompt=prompt, verbose=False)
+    
+    with st.spinner("Generating summary..."):
+        output_summary = chain.invoke(docs)
+    
+    output = output_summary['output_text']
+    
+    # Count output tokens
+    output_token_count = count_tokens(output)
+    
+    # Display token counts
+    st.write(f"**Output Tokens:** {output_token_count}")
+    st.write(f"**Total Tokens Used:** {input_token_count + output_token_count}")
+    
+    # Process sections
+    sections = ["Overview", "Involved Parties", "Key Events", "Key Findings"]
+    summary_json = {}
+    
+    for section in sections:
+        if section in output:
+            start = output.find(section)
+            next_section_index = float('inf')
+            
+            for s in sections:
+                pos = output.find(s, start + len(section))
+                if pos > -1 and pos < next_section_index:
+                    next_section_index = pos
+            
+            if next_section_index == float('inf'):
+                next_section_index = len(output)
+                
+            section_content = output[start + len(section):next_section_index].strip()
+            summary_json[section] = section_content
+    
+    json_summary = json.dumps(summary_json, indent=4)
+    
+    # Display and save results
+    st.write("### Summary (JSON format):")
+    st.json(json_summary)
+    
+    json_output_path = "summary_output.json"
+    with open(json_output_path, "w") as json_file:
+        json_file.write(json_summary)
+    
+    # Provide download link for JSON
+    with open(json_output_path, "rb") as json_file:
+        st.download_button("Download Summary JSON", json_file, file_name="summary_output.json", mime="application/json")
+    
+    # Create DOCX document
+    doc = DocxDocument()
+    
+    # Add token usage information to DOCX
+    doc.add_paragraph("Token Usage", style='Heading 1')
+    token_info = doc.add_paragraph()
+    token_info.add_run(f"Input Tokens: {input_token_count}\n").font.size = Pt(11)
+    token_info.add_run(f"Output Tokens: {output_token_count}\n").font.size = Pt(11)
+    token_info.add_run(f"Total Tokens: {input_token_count + output_token_count}").font.size = Pt(11)
+    
+    # Add sections to DOCX
+    if summary_json:
+        for section, content in summary_json.items():
+            doc.add_paragraph(section, style='Heading 1')
+            paragraph = doc.add_paragraph(content)
+            paragraph.runs[0].font.size = Pt(11)
+    
+    # Save DOCX file
+    doc_output_path = "summary_output.docx"
+    doc.save(doc_output_path)
+    
+    with open(doc_output_path, "rb") as doc_file:
+        st.download_button("Download Summary DOCX", doc_file, file_name="summary_output.docx", mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document")
+else:
+    st.write("Please upload a PDF file.")
