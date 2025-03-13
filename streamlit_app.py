@@ -41,7 +41,19 @@ if summarize_button and uploaded_file is not None:
                 top_p=0.2
             )
             
-            # Include the filename in the prompt
+            # PII instructions to integrate in the prompt
+            pii_instructions = """
+            IMPORTANT: DO NOT include any personally identifiable information (PII) in your summary, including:
+            - Bank account numbers
+            - Credit card numbers
+            - Social security numbers
+            - Passport numbers
+            - Personal mobile numbers
+            
+            If you encounter such information, DO NOT include it in your summary.
+            """
+            
+            # Include the filename and PII instructions in the prompt
             template = f'''
             Analyze the following document titled "{filename_without_ext}" and extract:
             
@@ -49,6 +61,8 @@ if summarize_button and uploaded_file is not None:
             2. Involved Parties (key individuals or organizations mentioned)
             3. Issues before the Court (precise summary of what happened in 5 lines)
             4. Observation/Decision of the Court (precisely the important rulings or conclusions in 5 lines)
+            
+            {pii_instructions}
             
             Format your response exactly as:
             
