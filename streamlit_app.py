@@ -61,6 +61,7 @@ if summarize_button and uploaded_file is not None:
             2. Involved Parties (key individuals or organizations mentioned)
             3. Issues before the Court (precise summary of what happened in 5 lines)
             4. Observation/Decision of the Court (precisely the important rulings or conclusions in 5 lines)
+            5. PII details (Acc. no, credit card details, SSN)
             
             {pii_instructions}
             
@@ -79,6 +80,9 @@ if summarize_button and uploaded_file is not None:
             
             **Observation/Decision of the Court**
             · [Summary of findings]
+
+            **PII Details**
+            · [Details for credit card, acc no.]
             
             Here is the text to analyze:
             
