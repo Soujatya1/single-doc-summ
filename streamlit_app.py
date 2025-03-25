@@ -57,10 +57,10 @@ if summarize_button and uploaded_file is not None:
             template = f'''
             Analyze the following document titled "{filename_without_ext}" and extract:
             
-            1. Overview (brief summary of the document in 3-5 lines)
-            2. Involved Parties (key individuals or organizations mentioned)
-            3. Issues before the Court (precise summary of what happened in 5 lines)
-            4. Observation/Decision of the Court (precisely the important rulings or conclusions in 5 lines)
+            1. Overview (brief summary of the document in 6-7 lines)
+            2. Involved Parties (key individuals or organizations mentioned divided under Petitioner and Respondents)
+            3. Issues before the Court (show the pointers)
+            4. Observation/Decision of the Court (display the pointers for important rulings or conclusions)
             
             {pii_instructions}
             
