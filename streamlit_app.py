@@ -59,8 +59,8 @@ if summarize_button and uploaded_file is not None:
             
             1. Overview (brief summary of the document in 6-7 lines - single paragraph)
             2. Involved Parties (key individuals or organizations mentioned divided under Petitioner and Respondents)
-            3. Issues before the Court (show the pointers)
-            4. Observation/Decision of the Court (display the pointers for important rulings or conclusions)
+            3. Issues before the Court (show the pointers, 4-5)
+            4. Observation/Decision of the Court (display the pointers for important rulings or conclusions, 4-5)
             
             {pii_instructions}
             
