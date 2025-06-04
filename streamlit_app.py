@@ -58,14 +58,9 @@ if summarize_button and uploaded_file is not None:
             Analyze the following document titled "{filename_without_ext}" and extract:
             
             1. Overview (brief summary of the document in 6-7 lines - single paragraph)
-            2. Involved Parties
+            2. Involved Parties (key individuals or organizations mentioned divided under Petitioner and Respondents)
             3. Issues before the Court (show the pointers, 4-5)
             4. Observation/Decision of the Court (display the pointers for important rulings or conclusions, 4-5)
-
-            The following case notice follows a fixed format:
-            - The Petitioner(s) name and address appear first, followed by the label "…Petitioner(s)"
-            - Then the keyword "versus" or "vs" appears
-            - After that, the Respondent(s) name and address are listed, ending with "…Respondent(s)"
 
             
             {pii_instructions}
