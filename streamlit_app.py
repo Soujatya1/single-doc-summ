@@ -51,7 +51,7 @@ model_provider = st.selectbox(
 if model_provider == "Groq":
     model_name = st.selectbox(
         "Select Groq Model",
-        ["llama3-70b-8192", "llama3-8b-8192", "mixtral-8x7b-32768"],
+        ["meta-llama/llama-4-scout-17b-16e-instruct"],
         index=0
     )
 elif model_provider == "Azure OpenAI":
