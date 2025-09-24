@@ -9,3 +9,5 @@ python-docx
 tiktoken
 reportlab
 langchain_openai
+pdf2image
+google-cloud-vision
