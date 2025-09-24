@@ -11,7 +11,7 @@ from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, ListItem, L
 import re
 import os
 import tempfile
-import fitz  # PyMuPDF
+import fitz
 from google.cloud import vision
 import io
 
