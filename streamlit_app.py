@@ -1,4 +1,3 @@
-
 import streamlit as st
 from PyPDF2 import PdfReader
 from langchain.docstore.document import Document
@@ -16,6 +15,7 @@ from google.cloud import vision
 import io
 from PIL import Image
 import pdf2image
+import fitz
 
 st.title("Document Summary Generator")
 
@@ -111,27 +111,33 @@ def setup_vision_client():
         return None
 
 def pdf_to_images(pdf_path):
-    """Convert PDF pages to images for OCR processing using pdf2image"""
+    """Convert PDF pages to images using PyMuPDF (doesn't require Poppler)"""
     try:
-        # Convert PDF to PIL Images with higher DPI for better OCR accuracy
-        pages = pdf2image.convert_from_path(pdf_path, dpi=200)
+        # Open the PDF
+        pdf_document = fitz.open(pdf_path)
         images = []
         
-        for page_num, page_image in enumerate(pages):
-            # Convert PIL Image to bytes
-            img_buffer = io.BytesIO()
-            page_image.save(img_buffer, format='PNG')
-            img_data = img_buffer.getvalue()
+        for page_num in range(len(pdf_document)):
+            # Get the page
+            page = pdf_document[page_num]
+            
+            # Convert page to image (matrix for higher resolution)
+            mat = fitz.Matrix(2.0, 2.0)  # 2x zoom for better quality
+            pix = page.get_pixmap(matrix=mat)
+            
+            # Convert to PIL Image
+            img_data = pix.tobytes("png")
             
             images.append({
                 "data": img_data,
                 "page": page_num + 1
             })
         
+        pdf_document.close()
         return images
+        
     except Exception as e:
-        st.error(f"Error converting PDF to images: {str(e)}")
-        st.error("Make sure you have poppler-utils installed. On Ubuntu: 'sudo apt-get install poppler-utils'")
+        st.error(f"Error converting PDF to images with PyMuPDF: {str(e)}")
         return []
 
 def extract_text_with_vision(pdf_path):
