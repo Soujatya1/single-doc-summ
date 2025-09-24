@@ -10,35 +10,49 @@ from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, ListItem, ListFlowable
 import re
 import os
+import tempfile
+import fitz  # PyMuPDF
+from google.cloud import vision
+import io
 
 st.title("Document Summary Generator")
 
-# API Key inputs
-st.subheader("API Configuration")
-col1, col2 = st.columns(2)
+# Sidebar for API Keys
+st.sidebar.header("API Configuration")
 
-with col1:
-    groq_api_key = st.text_input(
-        "Groq API Key", 
-        type="password", 
-        placeholder="Enter your Groq API key here",
-        help="Get your API key from https://console.groq.com/"
-    )
+# API Key inputs in sidebar
+groq_api_key = st.sidebar.text_input(
+    "Groq API Key", 
+    type="password", 
+    placeholder="Enter your Groq API key here",
+    help="Get your API key from https://console.groq.com/"
+)
 
-with col2:
-    azure_openai_key = st.text_input(
-        "Azure OpenAI API Key", 
-        type="password", 
-        placeholder="Enter your Azure OpenAI API key here",
-        help="Get your API key from Azure OpenAI service"
-    )
+azure_openai_key = st.sidebar.text_input(
+    "Azure OpenAI API Key", 
+    type="password", 
+    placeholder="Enter your Azure OpenAI API key here",
+    help="Get your API key from Azure OpenAI service"
+)
 
 # Azure OpenAI additional configuration
-azure_endpoint = st.text_input(
+azure_endpoint = st.sidebar.text_input(
     "Azure OpenAI Endpoint", 
     placeholder="https://your-resource.openai.azure.com/",
     help="Your Azure OpenAI service endpoint URL"
 )
+
+# Google Vision API Key
+google_vision_api_key = st.sidebar.text_input(
+    "Google Vision API Key",
+    type="password",
+    placeholder="Enter your Google Vision API key",
+    help="Get your API key from Google Cloud Console"
+)
+
+# Store in session state for easy access
+if google_vision_api_key:
+    st.session_state['google_vision_api_key'] = google_vision_api_key
 
 # Model selection
 st.subheader("Model Configuration")
@@ -63,11 +77,197 @@ elif model_provider == "Azure OpenAI":
 
 st.divider()
 
+# OCR Processing Options
+st.subheader("Text Extraction Options")
+ocr_mode = st.selectbox(
+    "Text Extraction Method",
+    ["Auto-detect", "Standard PDF Reader", "OCR (for scanned documents)"],
+    help="Choose how to extract text from your PDF"
+)
+
 # File upload
 uploaded_file = st.file_uploader("Upload a PDF file", type="pdf")
 
 # Add button after file upload
 summarize_button = st.button("Summarize", type="primary")
+
+def setup_vision_client():
+    """Setup Google Vision API client"""
+    try:
+        api_key = st.session_state.get('google_vision_api_key')
+        
+        if not api_key:
+            st.error("⚠️ Please enter your Google Vision API key in the sidebar.")
+            return None
+            
+        # Set up client with API key
+        client_options = {"api_key": api_key}
+        client = vision.ImageAnnotatorClient(client_options=client_options)
+        return client
+    except Exception as e:
+        st.error(f"Error setting up Google Vision client: {str(e)}")
+        return None
+
+def pdf_to_images(pdf_path):
+    """Convert PDF pages to images for OCR processing"""
+    try:
+        doc = fitz.open(pdf_path)
+        images = []
+        
+        for page_num in range(len(doc)):
+            page = doc.load_page(page_num)
+            # Higher resolution for better OCR accuracy
+            pix = page.get_pixmap(matrix=fitz.Matrix(2, 2))
+            img_data = pix.tobytes("png")
+            images.append({
+                "data": img_data,
+                "page": page_num + 1
+            })
+        
+        doc.close()
+        return images
+    except Exception as e:
+        st.error(f"Error converting PDF to images: {str(e)}")
+        return []
+
+def extract_text_with_vision(pdf_path):
+    """Extract text using Google Vision OCR"""
+    vision_client = setup_vision_client()
+    if not vision_client:
+        return []
+    
+    try:
+        images = pdf_to_images(pdf_path)
+        documents = []
+        
+        progress_bar = st.progress(0)
+        status_text = st.empty()
+        
+        for i, img_info in enumerate(images):
+            status_text.text(f"Processing page {img_info['page']} with OCR...")
+            progress_bar.progress((i + 1) / len(images))
+            
+            image = vision.Image(content=img_info["data"])
+            response = vision_client.text_detection(image=image)
+            
+            if response.error.message:
+                st.error(f"Vision API error on page {img_info['page']}: {response.error.message}")
+                continue
+            
+            texts = response.text_annotations
+            if texts:
+                extracted_text = texts[0].description
+                
+                doc = Document(
+                    page_content=extracted_text,
+                    metadata={
+                        "source": pdf_path,
+                        "page": img_info["page"],
+                        "type": "scanned_text",
+                        "extraction_method": "google_vision"
+                    }
+                )
+                documents.append(doc)
+        
+        progress_bar.empty()
+        status_text.empty()
+        return documents
+        
+    except Exception as e:
+        st.error(f"Error with Google Vision API: {str(e)}")
+        return []
+
+def extract_text_standard(uploaded_file):
+    """Extract text using standard PDF reader"""
+    try:
+        pdf = PdfReader(uploaded_file)
+        text = ''
+        total_pages = len(pdf.pages)
+        
+        for i, page in enumerate(pdf.pages):
+            content = page.extract_text()
+            if content:
+                text += content + "\n"
+        
+        return [Document(page_content=text)]
+    except Exception as e:
+        st.error(f"Error extracting text with standard method: {str(e)}")
+        return []
+
+def is_scanned_pdf(pdf_path):
+    """Detect if PDF is likely scanned (contains mostly images, little extractable text)"""
+    try:
+        # First try with PyPDF2
+        with open(pdf_path, 'rb') as file:
+            pdf = PdfReader(file)
+            total_text = ""
+            
+            # Sample first few pages to check for text content
+            pages_to_check = min(3, len(pdf.pages))
+            for i in range(pages_to_check):
+                page_text = pdf.pages[i].extract_text().strip()
+                total_text += page_text
+        
+        # If we get very little text from multiple pages, it's likely scanned
+        text_length = len(total_text.strip())
+        
+        # Also check with PyMuPDF for more accurate detection
+        doc = fitz.open(pdf_path)
+        has_images = False
+        text_blocks = 0
+        
+        for page_num in range(min(3, len(doc))):
+            page = doc.load_page(page_num)
+            # Check for images
+            image_list = page.get_images()
+            if image_list:
+                has_images = True
+            
+            # Check for text blocks
+            text_dict = page.get_text("dict")
+            for block in text_dict["blocks"]:
+                if "lines" in block:
+                    text_blocks += len(block["lines"])
+        
+        doc.close()
+        
+        # Decision logic: if very little text but has images, likely scanned
+        is_likely_scanned = (text_length < 100 and has_images) or (text_blocks < 5 and has_images)
+        
+        return is_likely_scanned, text_length
+        
+    except Exception as e:
+        st.warning(f"Could not analyze PDF structure: {str(e)}")
+        return False, 0
+
+def extract_text_auto_detect(uploaded_file):
+    """Automatically detect the best extraction method and extract text"""
+    # Save uploaded file temporarily
+    with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp_file:
+        tmp_file.write(uploaded_file.getvalue())
+        tmp_path = tmp_file.name
+    
+    try:
+        # Analyze the PDF
+        is_scanned, text_length = is_scanned_pdf(tmp_path)
+        
+        if is_scanned:
+            st.info(f"🔍 Detected scanned document (extracted text length: {text_length}). Using OCR...")
+            documents = extract_text_with_vision(tmp_path)
+        else:
+            st.info(f"📄 Detected standard PDF (extracted text length: {text_length}). Using standard extraction...")
+            # Reset file pointer for standard extraction
+            uploaded_file.seek(0)
+            documents = extract_text_standard(uploaded_file)
+        
+        return documents
+        
+    finally:
+        # Clean up temporary file
+        try:
+            os.unlink(tmp_path)
+        except:
+            pass
 
 # Validation function
 def validate_inputs():
@@ -90,6 +290,11 @@ def validate_inputs():
         st.error("Please upload a PDF file")
         return False
     
+    # Check for OCR requirements
+    if ocr_mode == "OCR (for scanned documents)" and not google_vision_api_key:
+        st.error("Please enter your Google Vision API key to use OCR")
+        return False
+    
     return True
 
 if summarize_button:
@@ -100,14 +305,32 @@ if summarize_button:
                 original_filename = uploaded_file.name
                 filename_without_ext = os.path.splitext(original_filename)[0]
                 
-                pdf = PdfReader(uploaded_file)
-                text = ''
-                for page in pdf.pages:
-                    content = page.extract_text()
-                    if content:
-                        text += content + "\n"
+                # Extract text based on selected mode
+                if ocr_mode == "Standard PDF Reader":
+                    st.info("📄 Using standard PDF text extraction...")
+                    docs = extract_text_standard(uploaded_file)
+                elif ocr_mode == "OCR (for scanned documents)":
+                    st.info("🔍 Using OCR for text extraction...")
+                    # Save uploaded file temporarily for OCR
+                    with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp_file:
+                        tmp_file.write(uploaded_file.getvalue())
+                        tmp_path = tmp_file.name
+                    try:
+                        docs = extract_text_with_vision(tmp_path)
+                    finally:
+                        os.unlink(tmp_path)
+                else:  # Auto-detect
+                    docs = extract_text_auto_detect(uploaded_file)
                 
-                docs = [Document(page_content=text)]
+                if not docs or not any(doc.page_content.strip() for doc in docs):
+                    st.error("No text could be extracted from the document. Please check if the file is valid or try OCR mode for scanned documents.")
+                    st.stop()
+                
+                # Combine all extracted text
+                combined_text = "\n".join([doc.page_content for doc in docs if doc.page_content.strip()])
+                docs = [Document(page_content=combined_text)]
+                
+                st.success(f"✅ Successfully extracted {len(combined_text)} characters of text")
                 
                 # Initialize LLM based on selected provider
                 if model_provider == "Groq":
@@ -270,3 +493,20 @@ if summarize_button:
             st.info("Please ensure you've uploaded a valid PDF file and provided correct API credentials.")
     else:
         st.warning("Please fill in all required fields before summarizing.")
+
+# Add installation instructions in the sidebar
+with st.sidebar:
+    st.markdown("---")
+    st.markdown("### 📋 Required Dependencies")
+    st.code("""
+    pip install streamlit PyPDF2 langchain langchain-groq 
+    pip install langchain-openai reportlab PyMuPDF 
+    pip install google-cloud-vision
+    """, language="bash")
+    
+    st.markdown("### 🔧 Setup Instructions")
+    st.markdown("""
+    1. **Groq API**: Get your API key from [console.groq.com](https://console.groq.com/)
+    2. **Azure OpenAI**: Set up your service in Azure Portal
+    3. **Google Vision**: Enable the Vision API in Google Cloud Console and get your API key
+    """)
