@@ -1,3 +1,4 @@
+
 import streamlit as st
 from PyPDF2 import PdfReader
 from langchain.docstore.document import Document
@@ -14,6 +15,7 @@ import tempfile
 from google.cloud import vision
 import io
 from PIL import Image
+import pdf2image
 
 st.title("Document Summary Generator")
 
@@ -79,11 +81,10 @@ st.divider()
 
 # OCR Processing Options
 st.subheader("Text Extraction Options")
-st.info("💡 OCR functionality is currently disabled. Using standard PDF text extraction only.")
 ocr_mode = st.selectbox(
     "Text Extraction Method",
-    ["Auto-detect", "Standard PDF Reader"],
-    help="OCR mode requires additional dependencies for PDF-to-image conversion"
+    ["Auto-detect", "Standard PDF Reader", "OCR (for scanned documents)"],
+    help="Choose how to extract text from your PDF"
 )
 
 # File upload
@@ -110,19 +111,75 @@ def setup_vision_client():
         return None
 
 def pdf_to_images(pdf_path):
-    """Convert PDF pages to images for OCR processing using PIL and basic conversion"""
-    st.warning("⚠️ OCR functionality requires image conversion. Without PyMuPDF, OCR quality may be limited.")
-    st.info("💡 For better OCR results, consider using 'Standard PDF Reader' mode or installing a PDF-to-image converter.")
-    
-    # Since we don't have PyMuPDF, we can't easily convert PDF to images
-    # We'll return empty list to skip OCR processing
-    return []
+    """Convert PDF pages to images for OCR processing using pdf2image"""
+    try:
+        # Convert PDF to PIL Images with higher DPI for better OCR accuracy
+        pages = pdf2image.convert_from_path(pdf_path, dpi=200)
+        images = []
+        
+        for page_num, page_image in enumerate(pages):
+            # Convert PIL Image to bytes
+            img_buffer = io.BytesIO()
+            page_image.save(img_buffer, format='PNG')
+            img_data = img_buffer.getvalue()
+            
+            images.append({
+                "data": img_data,
+                "page": page_num + 1
+            })
+        
+        return images
+    except Exception as e:
+        st.error(f"Error converting PDF to images: {str(e)}")
+        st.error("Make sure you have poppler-utils installed. On Ubuntu: 'sudo apt-get install poppler-utils'")
+        return []
 
 def extract_text_with_vision(pdf_path):
-    """Extract text using Google Vision OCR - requires PDF to image conversion"""
-    st.warning("⚠️ OCR mode requires PDF-to-image conversion which is not available without PyMuPDF.")
-    st.info("💡 Please use 'Standard PDF Reader' mode instead, or install PyMuPDF for OCR support.")
-    return []
+    """Extract text using Google Vision OCR"""
+    vision_client = setup_vision_client()
+    if not vision_client:
+        return []
+    
+    try:
+        images = pdf_to_images(pdf_path)
+        documents = []
+        
+        progress_bar = st.progress(0)
+        status_text = st.empty()
+        
+        for i, img_info in enumerate(images):
+            status_text.text(f"Processing page {img_info['page']} with OCR...")
+            progress_bar.progress((i + 1) / len(images))
+            
+            image = vision.Image(content=img_info["data"])
+            response = vision_client.text_detection(image=image)
+            
+            if response.error.message:
+                st.error(f"Vision API error on page {img_info['page']}: {response.error.message}")
+                continue
+            
+            texts = response.text_annotations
+            if texts:
+                extracted_text = texts[0].description
+                
+                doc = Document(
+                    page_content=extracted_text,
+                    metadata={
+                        "source": pdf_path,
+                        "page": img_info["page"],
+                        "type": "scanned_text",
+                        "extraction_method": "google_vision"
+                    }
+                )
+                documents.append(doc)
+        
+        progress_bar.empty()
+        status_text.empty()
+        return documents
+        
+    except Exception as e:
+        st.error(f"Error with Google Vision API: {str(e)}")
+        return []
 
 def extract_text_standard(uploaded_file):
     """Extract text using standard PDF reader"""
@@ -157,27 +214,36 @@ def is_scanned_pdf(pdf_path):
                     page = pdf.pages[i]
                     page_text = page.extract_text().strip()
                     total_text += page_text
-                except Exception:
+                    
+                    # Also check if page has images (rough estimation)
+                    # If page has very little extractable text, it might be scanned
+                    if len(page_text.strip()) < 50:  # Very little text on this page
+                        continue
+                        
+                except Exception as e:
+                    # If we can't extract text from a page, it might be scanned
                     continue
         
         text_length = len(total_text.strip())
         words_count = len(total_text.split())
         
-        # Decision logic based only on text analysis
+        # Decision logic based on text analysis
+        # If we have very little text relative to number of pages, likely scanned
         avg_text_per_page = text_length / pages_to_check if pages_to_check > 0 else 0
         avg_words_per_page = words_count / pages_to_check if pages_to_check > 0 else 0
         
-        # Conservative thresholds since we can't detect images
+        # Thresholds for detection
         is_likely_scanned = (
-            avg_text_per_page < 100 or  # Very little text per page
-            avg_words_per_page < 20 or  # Very few words per page
-            text_length < 50  # Almost no total text
+            avg_text_per_page < 200 or  # Less than 200 characters per page on average
+            avg_words_per_page < 30 or  # Less than 30 words per page on average
+            text_length < 100  # Very little total text
         )
         
         return is_likely_scanned, text_length
         
     except Exception as e:
         st.warning(f"Could not analyze PDF structure: {str(e)}")
+        # If we can't analyze, assume it might need OCR
         return True, 0
 
 def extract_text_auto_detect(uploaded_file):
@@ -192,11 +258,8 @@ def extract_text_auto_detect(uploaded_file):
         is_scanned, text_length = is_scanned_pdf(tmp_path)
         
         if is_scanned:
-            st.warning(f"⚠️ Detected potential scanned document (extracted text length: {text_length})")
-            st.info("💡 OCR is not available. Attempting standard extraction anyway...")
-            # Reset file pointer for standard extraction
-            uploaded_file.seek(0)
-            documents = extract_text_standard(uploaded_file)
+            st.info(f"🔍 Detected scanned document (extracted text length: {text_length}). Using OCR...")
+            documents = extract_text_with_vision(tmp_path)
         else:
             st.info(f"📄 Detected standard PDF (extracted text length: {text_length}). Using standard extraction...")
             # Reset file pointer for standard extraction
@@ -233,8 +296,10 @@ def validate_inputs():
         st.error("Please upload a PDF file")
         return False
     
-    # Check for OCR requirements - now disabled
-    # OCR functionality is not available without PyMuPDF
+    # Check for OCR requirements
+    if ocr_mode == "OCR (for scanned documents)" and not google_vision_api_key:
+        st.error("Please enter your Google Vision API key to use OCR")
+        return False
     
     return True
 
@@ -250,6 +315,16 @@ if summarize_button:
                 if ocr_mode == "Standard PDF Reader":
                     st.info("📄 Using standard PDF text extraction...")
                     docs = extract_text_standard(uploaded_file)
+                elif ocr_mode == "OCR (for scanned documents)":
+                    st.info("🔍 Using OCR for text extraction...")
+                    # Save uploaded file temporarily for OCR
+                    with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp_file:
+                        tmp_file.write(uploaded_file.getvalue())
+                        tmp_path = tmp_file.name
+                    try:
+                        docs = extract_text_with_vision(tmp_path)
+                    finally:
+                        os.unlink(tmp_path)
                 else:  # Auto-detect
                     docs = extract_text_auto_detect(uploaded_file)
                 
@@ -431,18 +506,13 @@ with st.sidebar:
     st.markdown("### 📋 Required Dependencies")
     st.code("""
     pip install streamlit PyPDF2 langchain langchain-groq 
-    pip install langchain-openai reportlab pillow
-    
-    # Optional for OCR (requires additional setup):
-    # pip install google-cloud-vision PyMuPDF
+    pip install langchain-openai reportlab PyMuPDF 
+    pip install google-cloud-vision
     """, language="bash")
     
     st.markdown("### 🔧 Setup Instructions")
     st.markdown("""
     1. **Groq API**: Get your API key from [console.groq.com](https://console.groq.com/)
     2. **Azure OpenAI**: Set up your service in Azure Portal
-    3. **Current Mode**: Standard PDF text extraction only
+    3. **Google Vision**: Enable the Vision API in Google Cloud Console and get your API key
     """)
-    
-    st.markdown("### 💡 Note")
-    st.info("OCR functionality has been disabled to avoid system dependencies. The app works great with standard PDFs that contain extractable text!")
