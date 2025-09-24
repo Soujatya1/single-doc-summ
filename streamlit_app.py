@@ -49,13 +49,13 @@ if google_vision_api_key:
 
 st.subheader("Model Configuration")
 model_provider = st.selectbox(
-    "Select AI Provider",
+    "AI Provider",
     ["Groq", "Azure OpenAI"]
 )
 
 if model_provider == "Groq":
     model_name = st.selectbox(
-        "Select Groq Model",
+        "Groq Model",
         ["meta-llama/llama-4-scout-17b-16e-instruct"],
         index=0
     )
@@ -65,6 +65,10 @@ elif model_provider == "Azure OpenAI":
         placeholder="your-gpt-deployment-name",
         help="The name of your Azure OpenAI deployment"
     )
+elif model_provider == "OpenAI":
+    model_name = st.selectbox(
+        "Model",
+        ["gpt-3.5-turbo"])
 
 st.divider()
 
