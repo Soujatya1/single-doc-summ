@@ -11,9 +11,10 @@ from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, ListItem, L
 import re
 import os
 import tempfile
-import fitz
 from google.cloud import vision
 import io
+from PIL import Image
+import pdf2image
 
 st.title("Document Summary Generator")
 
@@ -109,25 +110,27 @@ def setup_vision_client():
         return None
 
 def pdf_to_images(pdf_path):
-    """Convert PDF pages to images for OCR processing"""
+    """Convert PDF pages to images for OCR processing using pdf2image"""
     try:
-        doc = fitz.open(pdf_path)
+        # Convert PDF to PIL Images with higher DPI for better OCR accuracy
+        pages = pdf2image.convert_from_path(pdf_path, dpi=200)
         images = []
         
-        for page_num in range(len(doc)):
-            page = doc.load_page(page_num)
-            # Higher resolution for better OCR accuracy
-            pix = page.get_pixmap(matrix=fitz.Matrix(2, 2))
-            img_data = pix.tobytes("png")
+        for page_num, page_image in enumerate(pages):
+            # Convert PIL Image to bytes
+            img_buffer = io.BytesIO()
+            page_image.save(img_buffer, format='PNG')
+            img_data = img_buffer.getvalue()
+            
             images.append({
                 "data": img_data,
                 "page": page_num + 1
             })
         
-        doc.close()
         return images
     except Exception as e:
         st.error(f"Error converting PDF to images: {str(e)}")
+        st.error("Make sure you have poppler-utils installed. On Ubuntu: 'sudo apt-get install poppler-utils'")
         return []
 
 def extract_text_with_vision(pdf_path):
@@ -195,50 +198,52 @@ def extract_text_standard(uploaded_file):
         return []
 
 def is_scanned_pdf(pdf_path):
-    """Detect if PDF is likely scanned (contains mostly images, little extractable text)"""
+    """Detect if PDF is likely scanned using only PyPDF2"""
     try:
-        # First try with PyPDF2
         with open(pdf_path, 'rb') as file:
             pdf = PdfReader(file)
             total_text = ""
+            total_pages = len(pdf.pages)
             
             # Sample first few pages to check for text content
-            pages_to_check = min(3, len(pdf.pages))
-            for i in range(pages_to_check):
-                page_text = pdf.pages[i].extract_text().strip()
-                total_text += page_text
-        
-        # If we get very little text from multiple pages, it's likely scanned
-        text_length = len(total_text.strip())
-        
-        # Also check with PyMuPDF for more accurate detection
-        doc = fitz.open(pdf_path)
-        has_images = False
-        text_blocks = 0
-        
-        for page_num in range(min(3, len(doc))):
-            page = doc.load_page(page_num)
-            # Check for images
-            image_list = page.get_images()
-            if image_list:
-                has_images = True
+            pages_to_check = min(5, total_pages)
             
-            # Check for text blocks
-            text_dict = page.get_text("dict")
-            for block in text_dict["blocks"]:
-                if "lines" in block:
-                    text_blocks += len(block["lines"])
+            for i in range(pages_to_check):
+                try:
+                    page = pdf.pages[i]
+                    page_text = page.extract_text().strip()
+                    total_text += page_text
+                    
+                    # Also check if page has images (rough estimation)
+                    # If page has very little extractable text, it might be scanned
+                    if len(page_text.strip()) < 50:  # Very little text on this page
+                        continue
+                        
+                except Exception as e:
+                    # If we can't extract text from a page, it might be scanned
+                    continue
         
-        doc.close()
+        text_length = len(total_text.strip())
+        words_count = len(total_text.split())
         
-        # Decision logic: if very little text but has images, likely scanned
-        is_likely_scanned = (text_length < 100 and has_images) or (text_blocks < 5 and has_images)
+        # Decision logic based on text analysis
+        # If we have very little text relative to number of pages, likely scanned
+        avg_text_per_page = text_length / pages_to_check if pages_to_check > 0 else 0
+        avg_words_per_page = words_count / pages_to_check if pages_to_check > 0 else 0
+        
+        # Thresholds for detection
+        is_likely_scanned = (
+            avg_text_per_page < 200 or  # Less than 200 characters per page on average
+            avg_words_per_page < 30 or  # Less than 30 words per page on average
+            text_length < 100  # Very little total text
+        )
         
         return is_likely_scanned, text_length
         
     except Exception as e:
         st.warning(f"Could not analyze PDF structure: {str(e)}")
-        return False, 0
+        # If we can't analyze, assume it might need OCR
+        return True, 0
 
 def extract_text_auto_detect(uploaded_file):
     """Automatically detect the best extraction method and extract text"""
