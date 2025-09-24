@@ -11,4 +11,4 @@ reportlab
 langchain_openai
 pdf2image
 google-cloud-vision
-Pillow
+pillow
