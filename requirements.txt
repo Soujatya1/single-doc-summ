@@ -12,3 +12,4 @@ langchain_openai
 pdf2image
 google-cloud-vision
 pillow
+PyMuPDF
