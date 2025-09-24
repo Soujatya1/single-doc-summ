@@ -50,7 +50,7 @@ if google_vision_api_key:
 st.subheader("Model Configuration")
 model_provider = st.selectbox(
     "AI Provider",
-    ["Groq", "Azure OpenAI"]
+    ["Groq", "Azure OpenAI", "OpenAI"]
 )
 
 if model_provider == "Groq":
