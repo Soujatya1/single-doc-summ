@@ -293,7 +293,23 @@ if summarize_button:
     if validate_inputs():
         try:
             with st.spinner("Processing document..."):
-                # ... extraction code ...
+                original_filename = uploaded_file.name
+                filename_without_ext = os.path.splitext(original_filename)[0]
+                
+                if ocr_mode == "Standard PDF Reader":
+                    st.info("Using standard PDF text extraction...")
+                    docs = extract_text_standard(uploaded_file)
+                elif ocr_mode == "OCR (for scanned documents)":
+                    st.info("Using OCR for text extraction...")
+                    with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp_file:
+                        tmp_file.write(uploaded_file.getvalue())
+                        tmp_path = tmp_file.name
+                    try:
+                        docs = extract_text_with_vision(tmp_path)
+                    finally:
+                        os.unlink(tmp_path)
+                else:
+                    docs = extract_text_auto_detect(uploaded_file)
                 
                 if not docs or not any(doc.page_content.strip() for doc in docs):
                     st.error("No text could be extracted from the document...")
@@ -308,6 +324,7 @@ if summarize_button:
                 st.write(f"**Word count:** {len(combined_text.split())} words")
                 st.divider()
                 
+                combined_text = "\n".join([doc.page_content for doc in docs if doc.page_content.strip()])
                 docs = [Document(page_content=combined_text)]
                 
                 st.success(f"Successfully extracted {len(combined_text)} characters of text")
