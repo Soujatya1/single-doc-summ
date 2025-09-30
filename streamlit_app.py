@@ -124,8 +124,6 @@ def pdf_to_images(pdf_path):
         st.error(f"Error converting PDF to images with PyMuPDF: {str(e)}")
         return []
 
-To debug and see what is extracted from OCR, you should add print statements (using st.write() or st.info() in Streamlit) at key points in the extraction process. Here are the recommended locations:
-python# 1. In extract_text_with_vision function - after OCR extraction
 def extract_text_with_vision(pdf_path):
     vision_client = setup_vision_client()
     if not vision_client:
