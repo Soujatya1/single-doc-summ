@@ -124,6 +124,8 @@ def pdf_to_images(pdf_path):
         st.error(f"Error converting PDF to images with PyMuPDF: {str(e)}")
         return []
 
+To debug and see what is extracted from OCR, you should add print statements (using st.write() or st.info() in Streamlit) at key points in the extraction process. Here are the recommended locations:
+python# 1. In extract_text_with_vision function - after OCR extraction
 def extract_text_with_vision(pdf_path):
     vision_client = setup_vision_client()
     if not vision_client:
@@ -151,6 +153,12 @@ def extract_text_with_vision(pdf_path):
             if texts:
                 extracted_text = texts[0].description
                 
+                # ADD THIS: Show extracted text for each page
+                st.write(f"--- Page {img_info['page']} Extracted Text ---")
+                st.text_area(f"Page {img_info['page']}", extracted_text, height=200)
+                st.write(f"Character count: {len(extracted_text)}")
+                st.write("---")
+                
                 doc = Document(
                     page_content=extracted_text,
                     metadata={
@@ -164,6 +172,12 @@ def extract_text_with_vision(pdf_path):
         
         progress_bar.empty()
         status_text.empty()
+        
+        # ADD THIS: Show total extraction summary
+        st.success(f"OCR completed. Extracted text from {len(documents)} pages")
+        total_chars = sum(len(doc.page_content) for doc in documents)
+        st.info(f"Total characters extracted: {total_chars}")
+        
         return documents
         
     except Exception as e:
@@ -281,29 +295,21 @@ if summarize_button:
     if validate_inputs():
         try:
             with st.spinner("Processing document..."):
-                original_filename = uploaded_file.name
-                filename_without_ext = os.path.splitext(original_filename)[0]
-                
-                if ocr_mode == "Standard PDF Reader":
-                    st.info("Using standard PDF text extraction...")
-                    docs = extract_text_standard(uploaded_file)
-                elif ocr_mode == "OCR (for scanned documents)":
-                    st.info("Using OCR for text extraction...")
-                    with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp_file:
-                        tmp_file.write(uploaded_file.getvalue())
-                        tmp_path = tmp_file.name
-                    try:
-                        docs = extract_text_with_vision(tmp_path)
-                    finally:
-                        os.unlink(tmp_path)
-                else:
-                    docs = extract_text_auto_detect(uploaded_file)
+                # ... extraction code ...
                 
                 if not docs or not any(doc.page_content.strip() for doc in docs):
-                    st.error("No text could be extracted from the document. Please check if the file is valid or try OCR mode for scanned documents.")
+                    st.error("No text could be extracted from the document...")
                     st.stop()
                 
+                # ADD THIS: Show combined extracted text
                 combined_text = "\n".join([doc.page_content for doc in docs if doc.page_content.strip()])
+                
+                st.write("### 📄 Extracted Text Preview")
+                st.text_area("Full Extracted Content", combined_text[:5000] + "..." if len(combined_text) > 5000 else combined_text, height=300)
+                st.write(f"**Total length:** {len(combined_text)} characters")
+                st.write(f"**Word count:** {len(combined_text.split())} words")
+                st.divider()
+                
                 docs = [Document(page_content=combined_text)]
                 
                 st.success(f"Successfully extracted {len(combined_text)} characters of text")
